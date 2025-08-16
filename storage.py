@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, BINARY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from .database import Base  # Assuming you have a `Base` class that maps to your database
+from database import Base  # Change relative import to absolute import
 
 # User model (for login and password storage)
 class UserORM(Base):
@@ -15,7 +15,7 @@ class TotpResetORM(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, index=True)
     code = Column(String)
-    expires_at = Column(BigInteger)
+    expires_at = Column(Integer)
 
 # Transaction model
 class TransactionORM(Base):
@@ -37,11 +37,13 @@ class TransactionORM(Base):
 # Initialize database with Base
 def init_db():
     from sqlalchemy import create_engine
-    from .database import SessionLocal
+    from database import SessionLocal
     engine = create_engine("DATABASE_URL")  # Replace with your actual DB URL
     Base.metadata.create_all(bind=engine)
 
 # Helper functions for password hashing and TOTP resets
+from passlib.context import CryptContext
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_user(db: Session, username: str, password: str):
@@ -53,21 +55,5 @@ def create_user(db: Session, username: str, password: str):
     return db_user
 
 def get_user_by_username(db: Session, username: str):
-    return db.query(UserORM).filter(UserORM.username == username).first()
+    return db.query(UserORM).
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_totp_reset(db: Session, username: str):
-    return db.query(TotpResetORM).filter(TotpResetORM.username == username).first()
-
-def create_totp_reset(db: Session, username: str, code: str, expires_at: int):
-    db_reset = TotpResetORM(username=username, code=code, expires_at=expires_at)
-    db.add(db_reset)
-    db.commit()
-    db.refresh(db_reset)
-    return db_reset
-
-def delete_totp_reset(db: Session, username: str):
-    db.query(TotpResetORM).filter(TotpResetORM.username == username).delete()
-    db.commit()
