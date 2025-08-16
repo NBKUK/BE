@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+SQLAlchemy>=2
+python-dotenv
+pyotp
+passlib
+psycopg2-binary
