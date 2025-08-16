@@ -1,61 +1,28 @@
-from sqlalchemy import Column, String, Integer, BigInteger
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
-from passlib.context import CryptContext
-import time
+from sqlalchemy.orm import sessionmaker
 import os
 
-# Define Base class for ORM
+# Set up database connection string (adjust as per your setup)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")  # Example using SQLite
+
+# Create engine and session
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base class for ORM models
 Base = declarative_base()
 
-# Cryptographic context for hashing passwords
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Initialize the database by creating tables
+def init_db():
+    # Create all tables in the database
+    Base.metadata.create_all(bind=engine)
 
-# User model (for login and password storage)
-class UserORM(Base):
-    __tablename__ = "users"
-    username = Column(String, primary_key=True, index=True)
-    password_hash = Column(String)
+# Database session function for FastAPI usage
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# TOTP requests table
-class TotpResetORM(Base):
-    __tablename__ = "totp_resets"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, index=True)
-    code = Column(String)
-    expires_at = Column(BigInteger)
-
-# Database functions
-def create_user(db: Session, username: str, password: str):
-    # Hash password before saving
-    hashed_password = pwd_context.hash(password)
-    db_user = UserORM(username=username, password_hash=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-def get_user_by_username(db: Session, username: str):
-    # Fetch user by username
-    return db.query(UserORM).filter(UserORM.username == username).first()
-
-def verify_password(plain_password, hashed_password):
-    # Verify plain password against hashed password
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_totp_reset(db: Session, username: str):
-    # Fetch TOTP reset record by username
-    return db.query(TotpResetORM).filter(TotpResetORM.username == username).first()
-
-def create_totp_reset(db: Session, username: str, code: str, expires_at: int):
-    # Create a new TOTP reset record with expiration time (in seconds or milliseconds)
-    db_reset = TotpResetORM(username=username, code=code, expires_at=expires_at)
-    db.add(db_reset)
-    db.commit()
-    db.refresh(db_reset)
-    return db_reset
-
-def delete_totp_reset(db: Session, username: str):
-    # Delete TOTP reset record for the given username
-    db.query(TotpResetORM).filter(TotpResetORM.username == username).delete()
-    db.commit()
