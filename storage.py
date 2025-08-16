@@ -1,28 +1,31 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-import os
+from sqlalchemy import Column, String, Integer, Float, DateTime, BINARY
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from .database import Base  # Assuming you have a `Base` class that maps to your database
 
-# Set up database connection string (adjust as per your setup)
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")  # Example using SQLite
+class TransactionORM(Base):
+    __tablename__ = 'transactions'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+    amount = Column(Float)
+    currency = Column(String)
+    protocol = Column(String)
+    auth_code = Column(String)
+    masked_pan = Column(String)
+    status = Column(String)
+    step_0210 = Column(BINARY)  # Store step 0210 as a binary field
+    step_0230 = Column(BINARY)  # Store step 0230 as a binary field
+    step_0510 = Column(BINARY)  # Store step 0510 as a binary field
+    receipt_id = Column(String)
 
-# Create engine and session
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    # You can also define a relationship to other tables if needed, for example:
+    # receipt = relationship("ReceiptORM", back_populates="transaction")
 
-# Base class for ORM models
-Base = declarative_base()
-
-# Initialize the database by creating tables
+# Initialize database with Base
 def init_db():
-    # Create all tables in the database
+    # Assuming `Base` is from SQLAlchemy, you would create the tables like this:
+    from sqlalchemy import create_engine
+    from .database import SessionLocal
+    engine = create_engine("DATABASE_URL")  # Replace with your actual DB URL
     Base.metadata.create_all(bind=engine)
-
-# Database session function for FastAPI usage
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
