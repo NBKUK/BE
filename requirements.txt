@@ -6,3 +6,4 @@ python-dotenv
 pyotp
 passlib
 psycopg2-binary
+models
