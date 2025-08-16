@@ -1,10 +1,14 @@
 from sqlalchemy import Column, String, Integer, BigInteger
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import text
+from sqlalchemy.ext.declarative import declarative_base
 from passlib.context import CryptContext
 import time
 import os
 
+# Define Base class for ORM
+Base = declarative_base()
+
+# Cryptographic context for hashing passwords
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # User model (for login and password storage)
@@ -23,6 +27,7 @@ class TotpResetORM(Base):
 
 # Database functions
 def create_user(db: Session, username: str, password: str):
+    # Hash password before saving
     hashed_password = pwd_context.hash(password)
     db_user = UserORM(username=username, password_hash=hashed_password)
     db.add(db_user)
@@ -31,15 +36,19 @@ def create_user(db: Session, username: str, password: str):
     return db_user
 
 def get_user_by_username(db: Session, username: str):
+    # Fetch user by username
     return db.query(UserORM).filter(UserORM.username == username).first()
 
 def verify_password(plain_password, hashed_password):
+    # Verify plain password against hashed password
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_totp_reset(db: Session, username: str):
+    # Fetch TOTP reset record by username
     return db.query(TotpResetORM).filter(TotpResetORM.username == username).first()
 
 def create_totp_reset(db: Session, username: str, code: str, expires_at: int):
+    # Create a new TOTP reset record with expiration time (in seconds or milliseconds)
     db_reset = TotpResetORM(username=username, code=code, expires_at=expires_at)
     db.add(db_reset)
     db.commit()
@@ -47,6 +56,6 @@ def create_totp_reset(db: Session, username: str, code: str, expires_at: int):
     return db_reset
 
 def delete_totp_reset(db: Session, username: str):
+    # Delete TOTP reset record for the given username
     db.query(TotpResetORM).filter(TotpResetORM.username == username).delete()
     db.commit()
-
