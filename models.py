@@ -1,12 +1,12 @@
-from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Any, Optional
-import re
+# app_models.py  (pydantic I/O models)
+from pydantic import BaseModel, Field
+from typing import List, Optional
 
 # ---- Input from POS (manual keyed entry) ----
 class CardEntry(BaseModel):
     protocol: str
     amount: float = Field(..., description="Amount in major units, e.g., 12.34")
-    currency: str = Field(..., description="ISO 4217 currency code, e.g., USD/GBP/EUR")
+    currency: str = Field("USD", description="ISO 4217, e.g., USD/GBP/EUR")
     card_number: str
     expiry: str  # "MM/YY"
     cvv: str
@@ -15,26 +15,8 @@ class CardEntry(BaseModel):
     pinless: bool = False
     mid: str = "MID00001"
     tid: str = "TID00001"
-    payout_method: str = Field("BANK", description="Payment method, can be BANK or CRYPTO")
+    payout_method: str = "BANK"  # BANK|CRYPTO
     payout_target: Optional[str] = None
-
-    @validator('card_number')
-    def validate_card_number(cls, v):
-        if not re.match(r'^\d{16}$', v):
-            raise ValueError("Card number must be 16 digits.")
-        return v
-
-    @validator('expiry')
-    def validate_expiry(cls, v):
-        if not re.match(r'^\d{2}/\d{2}$', v):
-            raise ValueError("Expiry date must be in MM/YY format.")
-        return v
-
-    @validator('cvv')
-    def validate_cvv(cls, v):
-        if not re.match(r'^\d{3}$', v):
-            raise ValueError("CVV must be 3 digits.")
-        return v
 
 # ---- Output structures ----
 class StepOut(BaseModel):
