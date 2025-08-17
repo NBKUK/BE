@@ -6,9 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app_models import (
-    CardEntry, TransactionOut, StepOut, ReceiptOut,
-    TxHistoryOut, TxHistoryItem, UserORM
+    CardEntry, StepOut, TransactionOut, ReceiptOut,
+    TxHistoryOut, LoginIn, TokenPair
 )
+
+from storage import UserORM, TransactionORM   # ✅ correct place
+
 from storage import init_db, get_db, TransactionORM, now_iso
 from iso8583_tcp import ISO8583, iso_send_tcp, b64, MAC_HEX_KEY
 
