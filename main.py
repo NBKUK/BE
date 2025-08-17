@@ -64,7 +64,7 @@ app = FastAPI(title="POS Backend (ISO8583 MTI 0200→0510 + Payout)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "https://scania-vu93.onrender.com").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
