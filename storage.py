@@ -1,6 +1,6 @@
-# storage.py (only the ORM shown; keep the rest of your file as before)
-from sqlalchemy import Column, Integer, String, Float, Text
-from sqlalchemy.orm import declarative_base, sessionmaker
+# storage.py
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy import create_engine
 import os
 from datetime import datetime
@@ -13,8 +13,29 @@ Base = declarative_base()
 def now_iso() -> str:
     return datetime.utcnow().isoformat()
 
+# ------------------ User ORM ------------------
+class UserORM(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    username = Column(String(64), unique=True, index=True, nullable=False)
+    password_hash = Column(String(128), nullable=False)
+
+# ------------------ TOTP Reset ORM ------------------
+class TotpResetORM(Base):
+    __tablename__ = "totp_resets"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reset_token = Column(String(128), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("UserORM")
+
+# ------------------ Transaction ORM ------------------
 class TransactionORM(Base):
     __tablename__ = "transactions"
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     created_at = Column(String(40), nullable=False)
     amount = Column(Float, nullable=False)
@@ -27,8 +48,9 @@ class TransactionORM(Base):
     step_0230 = Column(Text)
     step_0510 = Column(Text)
     receipt_id = Column(String(64), nullable=False, unique=True)
-    payout_status = Column(String(128), nullable=True)  # <—— NEW
+    payout_status = Column(String(128), nullable=True)  # NEW field
 
+# ------------------ DB Helpers ------------------
 def init_db():
     Base.metadata.create_all(bind=engine)
 
