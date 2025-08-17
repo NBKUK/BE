@@ -1,4 +1,3 @@
-# app_models.py  (pydantic I/O models)
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -55,6 +54,7 @@ class TxHistoryItem(BaseModel):
 class TxHistoryOut(BaseModel):
     items: List[TxHistoryItem]
 
+# (Optional) simple auth models if you use them elsewhere
 class LoginIn(BaseModel):
     username: str
     password: str
@@ -69,4 +69,3 @@ class TotpVerifyIn(BaseModel):
     username: str
     code: str
     new_password: str
-
