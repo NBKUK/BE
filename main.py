@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app_models import (
-    CardEntry, TransactionOut, StepOut, ReceiptOut, TxHistoryOut, TxHistoryItem
+    CardEntry, TransactionOut, StepOut, ReceiptOut,
+    TxHistoryOut, TxHistoryItem, UserORM
 )
 from storage import init_db, get_db, TransactionORM, now_iso
 from iso8583_tcp import ISO8583, iso_send_tcp, b64, MAC_HEX_KEY
@@ -14,11 +15,12 @@ from iso8583_tcp import ISO8583, iso_send_tcp, b64, MAC_HEX_KEY
 from notify import manager, emit
 from payout import bank_payout, crypto_payout, notify_webhook
 
-# JWT bits (kept as-is if you already use them)
+# JWT + password hashing
 import jwt
 from datetime import datetime, timedelta
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import pyotp
+from passlib.hash import bcrypt
+from pydantic import BaseModel
 
 SECRET_KEY = os.getenv("JWT_SECRET", "change-me")
 ALGORITHM = "HS256"
@@ -37,12 +39,12 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise HTTPException(status_code=401, detail="Token does not contain valid credentials")
+            raise HTTPException(status_code=401, detail="Token missing username")
         return username
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Token is invalid or expired")
+        raise HTTPException(status_code=401, detail="Token invalid or expired")
 
-# ------- Protocols & auth-code rules (unchanged) -------
+# ------------- Protocol rules ----------------
 PROTOCOLS = {
     "POS Terminal -101.1 (4-digit approval)": 4,
     "POS Terminal -101.4 (6-digit approval)": 6,
@@ -54,6 +56,7 @@ PROTOCOLS = {
     "POS Terminal -201.5 (6-digit approval)": 6,
 }
 
+# ------------- FastAPI app ----------------
 app = FastAPI(title="POS Backend (ISO8583 MTI 0200→0510 + Payout)")
 
 app.add_middleware(
@@ -66,6 +69,38 @@ app.add_middleware(
 
 init_db()
 
+# ------------- Seed admin ----------------
+@app.on_event("startup")
+def seed_admin():
+    db = next(get_db())
+    admin_user = os.getenv("ADMIN_USERNAME", "admin")
+    admin_pass = os.getenv("ADMIN_PASSWORD", "changeme")
+
+    u = db.query(UserORM).filter(UserORM.username == admin_user).first()
+    if not u:
+        db.add(UserORM(
+            username=admin_user,
+            password_hash=bcrypt.hash(admin_pass),
+            role="admin"
+        ))
+        db.commit()
+        print(f"✅ Default admin seeded: {admin_user}/{admin_pass}")
+
+# ------------- Login ----------------
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+@app.post("/login")
+def login(data: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(UserORM).filter(UserORM.username == data.username).first()
+    if not user or not bcrypt.verify(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    token = create_access_token({"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+# ------------- Utils ----------------
 def mask_pan(pan: str) -> str:
     d = "".join(ch for ch in pan if ch.isdigit())
     return ("*" * max(0, len(d)-4)) + d[-4:] if len(d) >= 4 else d
@@ -73,21 +108,19 @@ def mask_pan(pan: str) -> str:
 def cents(amount_major: float) -> int:
     return int(round(amount_major * 100))
 
-# --------------------- WebSocket ---------------------
+# ------------- WebSocket ----------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep the socket open; you can listen to pings if needed.
             await websocket.receive_text()
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
 
-# --------------------- Transaction -------------------
+# ------------- Transaction ----------------
 @app.post("/transaction", response_model=TransactionOut)
 async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
-    # Validate protocol & auth code length
     if entry.protocol not in PROTOCOLS:
         raise HTTPException(400, detail="Unsupported protocol")
     req_len = PROTOCOLS[entry.protocol]
@@ -96,7 +129,6 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
     if entry.amount <= 0:
         raise HTTPException(400, detail="Invalid amount")
 
-    # Build DEs
     iso = ISO8583(MAC_HEX_KEY)
     now = datetime.utcnow()
     de_common = {
@@ -116,10 +148,9 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
             "978",
     }
 
-    # PAN + expiry
     pan_digits = "".join(ch for ch in entry.card_number if ch.isdigit())
     exp = entry.expiry.replace("/", "")
-    if len(exp) == 4:  # MMYY -> YYMM
+    if len(exp) == 4:
         exp_de14 = exp[2:] + exp[:2]
     else:
         raise HTTPException(400, detail="Expiry must be MM/YY")
@@ -127,7 +158,6 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
     tx_id = str(uuid.uuid4())
     created = now_iso()
 
-    # Emit: transaction started
     await emit("TX_STARTED", tx_id, {"amount": entry.amount, "currency": entry.currency, "protocol": entry.protocol})
     await notify_webhook({"stage": "TX_STARTED", "tx_id": tx_id})
 
@@ -177,12 +207,11 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
         await notify_webhook({"stage": "0510_FAIL", "tx_id": tx_id, "error": str(e)})
         raise HTTPException(502, detail=f"0500/0510 failed: {e}")
 
-    # ---- Payout (immediately after 0510) ----
+    # ---- Payout ----
     payout_result = None
     payout_status = "SKIPPED"
     try:
         if entry.payout_method.upper() == "BANK":
-            # Expect entry.payout_target like "IBAN|NAME" (simple parse)
             if not entry.payout_target or "|" not in entry.payout_target:
                 raise ValueError("payout_target required as 'IBAN|Beneficiary Name' for BANK")
             iban, name = entry.payout_target.split("|", 1)
@@ -220,7 +249,7 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
         await emit("PAYOUT_FAIL", tx_id, {"error": str(e)})
         await notify_webhook({"stage": "PAYOUT_FAIL", "tx_id": tx_id, "error": str(e)})
 
-    # ---- store + receipt ----
+    # ---- Store + receipt ----
     masked = mask_pan(pan_digits)
     rec = ReceiptOut(
         transaction_id=tx_id,
@@ -260,7 +289,7 @@ async def process_transaction(entry: CardEntry, db: Session = Depends(get_db)):
         receipt=rec,
     )
 
-# --------------- History -----------------
+# ------------- History ----------------
 @app.get("/transactions", response_model=TxHistoryOut)
 def list_transactions(db: Session = Depends(get_db)):
     rows = db.query(TransactionORM).order_by(TransactionORM.id.desc()).limit(500).all()
