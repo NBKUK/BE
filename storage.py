@@ -20,6 +20,7 @@ class UserORM(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     username = Column(String(64), unique=True, index=True, nullable=False)
     password_hash = Column(String(128), nullable=False)
+    role = Column(String(20), nullable=False, default="user")  # ✅ added role field
 
 # ------------------ TOTP Reset ORM ------------------
 class TotpResetORM(Base):
@@ -48,7 +49,7 @@ class TransactionORM(Base):
     step_0230 = Column(Text)
     step_0510 = Column(Text)
     receipt_id = Column(String(64), nullable=False, unique=True)
-    payout_status = Column(String(128), nullable=True)  # NEW field
+    payout_status = Column(String(128), nullable=True)  # ✅ already correct
 
 # ------------------ DB Helpers ------------------
 def init_db():
